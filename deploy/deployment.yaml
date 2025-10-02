@@ -1,0 +1,167 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: astrolabe-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: astrolabe
+  namespace: astrolabe-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: astrolabe-reader
+rules:
+  # Core resources
+  - apiGroups: [""]
+    resources:
+      - pods
+      - services
+      - serviceaccounts
+      - configmaps
+      - secrets
+      - persistentvolumeclaims
+      - persistentvolumes
+      - namespaces
+      - endpoints
+    verbs: ["get", "list", "watch"]
+  
+  # Apps resources
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - statefulsets
+      - daemonsets
+      - replicasets
+    verbs: ["get", "list", "watch"]
+  
+  # Batch resources
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+      - cronjobs
+    verbs: ["get", "list", "watch"]
+  
+  # Networking resources
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingresses
+      - networkpolicies
+      - ingressclasses
+    verbs: ["get", "list", "watch"]
+  
+  # Discovery resources
+  - apiGroups: ["discovery.k8s.io"]
+    resources:
+      - endpointslices
+    verbs: ["get", "list", "watch"]
+  
+  # Storage resources
+  - apiGroups: ["storage.k8s.io"]
+    resources:
+      - storageclasses
+    verbs: ["get", "list", "watch"]
+  
+  # Autoscaling resources
+  - apiGroups: ["autoscaling"]
+    resources:
+      - horizontalpodautoscalers
+    verbs: ["get", "list", "watch"]
+  
+  # Policy resources
+  - apiGroups: ["policy"]
+    resources:
+      - poddisruptionbudgets
+    verbs: ["get", "list", "watch"]
+  
+  # RBAC resources (optional)
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources:
+      - roles
+      - rolebindings
+      - clusterroles
+      - clusterrolebindings
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: astrolabe-reader-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: astrolabe-reader
+subjects:
+  - kind: ServiceAccount
+    name: astrolabe
+    namespace: astrolabe-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: astrolabe
+  namespace: astrolabe-system
+  labels:
+    app: astrolabe
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: astrolabe
+  template:
+    metadata:
+      labels:
+        app: astrolabe
+    spec:
+      serviceAccountName: astrolabe
+      containers:
+        - name: astrolabe
+          image: astrolabe:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - --in-cluster=true
+            - --port=8080
+            - --label-selector=app.kubernetes.io/managed-by=Helm
+            - --v=2
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: astrolabe
+  namespace: astrolabe-system
+  labels:
+    app: astrolabe
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app: astrolabe

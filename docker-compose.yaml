@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: astrolabe-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - astrolabe-network
+
+  astrolabe:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: astrolabe
+    ports:
+      - "8080:8080"
+    environment:
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=0
+      - ENABLE_PERSISTENCE=true
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - astrolabe-network
+    # Mount kubeconfig for local development
+    volumes:
+      - ${HOME}/.kube/config:/root/.kube/config:ro
+
+volumes:
+  redis-data:
+    driver: local
+
+networks:
+  astrolabe-network:
+    driver: bridge
