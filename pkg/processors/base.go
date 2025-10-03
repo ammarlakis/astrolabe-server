@@ -4,18 +4,18 @@ import (
 	"fmt"
 
 	"github.com/ammarlakis/astrolabe/pkg/graph"
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 )
 
 // BaseProcessor provides common functionality for all processors
 type BaseProcessor struct {
-	graph GraphInterface
+	graph graph.GraphInterface
 }
 
 // NewBaseProcessor creates a new base processor
-func NewBaseProcessor(g GraphInterface) *BaseProcessor {
+func NewBaseProcessor(g graph.GraphInterface) *BaseProcessor {
 	return &BaseProcessor{graph: g}
 }
 
@@ -25,10 +25,10 @@ func (p *BaseProcessor) handleDelete(obj interface{}, kind string) error {
 	if !ok {
 		return fmt.Errorf("object does not implement metav1.Object")
 	}
-	
+
 	uid := metaObj.GetUID()
 	klog.V(3).Infof("Deleting %s: %s/%s (UID: %s)", kind, metaObj.GetNamespace(), metaObj.GetName(), uid)
-	
+
 	p.graph.RemoveNode(uid)
 	return nil
 }
@@ -44,10 +44,10 @@ func (p *BaseProcessor) createOwnershipEdges(node *graph.Node, ownerRefs []v1.Ow
 				ToUID:   node.UID,
 			}
 			p.graph.AddEdge(edge)
-			klog.V(4).Infof("Created ownership edge: %s/%s -> %s/%s", 
+			klog.V(4).Infof("Created ownership edge: %s/%s -> %s/%s",
 				ownerNode.Kind, ownerNode.Name, node.Kind, node.Name)
 		} else {
-			klog.V(4).Infof("Owner not found in graph yet: %s/%s (UID: %s)", 
+			klog.V(4).Infof("Owner not found in graph yet: %s/%s (UID: %s)",
 				owner.Kind, owner.Name, owner.UID)
 		}
 	}
@@ -68,11 +68,11 @@ func (p *BaseProcessor) findNodeByNamespaceKindName(namespace, kind, name string
 func (p *BaseProcessor) findNodesByLabelSelector(namespace, kind string, selector map[string]string) []*graph.Node {
 	// Get all nodes of the specified kind in the namespace
 	nodes := p.graph.GetNodesByNamespaceKind(namespace, kind)
-	
+
 	if len(selector) == 0 {
 		return nodes
 	}
-	
+
 	// Filter by selector
 	var result []*graph.Node
 	for _, node := range nodes {
@@ -94,11 +94,11 @@ func matchesSelector(labels, selector map[string]string) bool {
 }
 
 // createEdgeIfNodeExists creates an edge if the target node exists
-func (p *BaseProcessor) createEdgeIfNodeExists(fromUID, toUID types.UID, edgeType graph.EdgeType) bool {
+func (p *BaseProcessor) createEdgeIfNodeExists(fromUID, toUID types.UID, edgeType graph.EdgeType) {
 	edge := &graph.Edge{
 		Type:    edgeType,
 		FromUID: fromUID,
 		ToUID:   toUID,
 	}
-	return p.graph.AddEdge(edge)
+	p.graph.AddEdge(edge)
 }

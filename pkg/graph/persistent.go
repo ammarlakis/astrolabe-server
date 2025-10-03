@@ -25,12 +25,12 @@ type PersistenceBackend interface {
 // PersistentGraph wraps a Graph with persistence capabilities
 type PersistentGraph struct {
 	*Graph
-	backend       PersistenceBackend
-	enabled       bool
-	asyncWrites   bool
-	writeChan     chan writeOp
-	stopChan      chan struct{}
-	wg            sync.WaitGroup
+	backend     PersistenceBackend
+	enabled     bool
+	asyncWrites bool
+	writeChan   chan writeOp
+	stopChan    chan struct{}
+	wg          sync.WaitGroup
 }
 
 type writeOp struct {
@@ -50,12 +50,12 @@ func NewPersistentGraph(backend PersistenceBackend, asyncWrites bool) *Persisten
 		asyncWrites: asyncWrites,
 		stopChan:    make(chan struct{}),
 	}
-	
+
 	if pg.enabled && asyncWrites {
 		pg.writeChan = make(chan writeOp, 1000) // Buffer for async writes
 		pg.startAsyncWriter()
 	}
-	
+
 	return pg
 }
 
@@ -65,19 +65,19 @@ func (pg *PersistentGraph) LoadFromBackend() error {
 		klog.Info("Persistence disabled, starting with empty graph")
 		return nil
 	}
-	
+
 	klog.Info("Loading graph from persistence backend...")
 	start := time.Now()
-	
+
 	// Load graph from backend
 	g, err := pg.backend.LoadGraph()
 	if err != nil {
 		return err
 	}
-	
+
 	// Replace in-memory graph
 	pg.Graph = g
-	
+
 	klog.Infof("Graph loaded from backend in %v: %d nodes", time.Since(start), len(pg.nodes))
 	return nil
 }
@@ -86,7 +86,7 @@ func (pg *PersistentGraph) LoadFromBackend() error {
 func (pg *PersistentGraph) AddNode(node *Node) {
 	// Add to in-memory graph
 	pg.Graph.AddNode(node)
-	
+
 	// Persist
 	if pg.enabled {
 		if pg.asyncWrites {
@@ -107,7 +107,7 @@ func (pg *PersistentGraph) AddNode(node *Node) {
 func (pg *PersistentGraph) RemoveNode(uid types.UID) {
 	// Remove from in-memory graph
 	pg.Graph.RemoveNode(uid)
-	
+
 	// Delete from persistence
 	if pg.enabled {
 		if pg.asyncWrites {
@@ -128,11 +128,11 @@ func (pg *PersistentGraph) RemoveNode(uid types.UID) {
 func (pg *PersistentGraph) AddEdge(edge *Edge) bool {
 	// Add to in-memory graph
 	success := pg.Graph.AddEdge(edge)
-	
+
 	if !success {
 		return false
 	}
-	
+
 	// Persist
 	if pg.enabled {
 		if pg.asyncWrites {
@@ -147,7 +147,7 @@ func (pg *PersistentGraph) AddEdge(edge *Edge) bool {
 			}
 		}
 	}
-	
+
 	return true
 }
 
@@ -155,7 +155,7 @@ func (pg *PersistentGraph) AddEdge(edge *Edge) bool {
 func (pg *PersistentGraph) RemoveEdge(fromUID, toUID types.UID) {
 	// Remove from in-memory graph
 	pg.Graph.RemoveEdge(fromUID, toUID)
-	
+
 	// Delete from persistence
 	if pg.enabled {
 		if pg.asyncWrites {
@@ -177,14 +177,14 @@ func (pg *PersistentGraph) Snapshot() error {
 	if !pg.enabled {
 		return nil
 	}
-	
+
 	klog.Info("Creating graph snapshot...")
 	start := time.Now()
-	
+
 	if err := pg.backend.SaveGraph(pg.Graph); err != nil {
 		return err
 	}
-	
+
 	klog.Infof("Snapshot completed in %v", time.Since(start))
 	return nil
 }
@@ -194,19 +194,19 @@ func (pg *PersistentGraph) Close() error {
 	if !pg.enabled {
 		return nil
 	}
-	
+
 	if pg.asyncWrites {
 		// Stop async writer
 		close(pg.stopChan)
 		pg.wg.Wait()
-		
+
 		// Flush remaining writes
 		close(pg.writeChan)
 		for op := range pg.writeChan {
 			pg.executeWriteOp(op)
 		}
 	}
-	
+
 	// Close backend
 	return pg.backend.Close()
 }
@@ -216,31 +216,31 @@ func (pg *PersistentGraph) startAsyncWriter() {
 	pg.wg.Add(1)
 	go func() {
 		defer pg.wg.Done()
-		
+
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
-		
+
 		batchSize := 100
 		batch := make([]writeOp, 0, batchSize)
-		
+
 		for {
 			select {
 			case op := <-pg.writeChan:
 				batch = append(batch, op)
-				
+
 				// Execute batch when full
 				if len(batch) >= batchSize {
 					pg.executeBatch(batch)
 					batch = batch[:0]
 				}
-				
+
 			case <-ticker.C:
 				// Periodic flush
 				if len(batch) > 0 {
 					pg.executeBatch(batch)
 					batch = batch[:0]
 				}
-				
+
 			case <-pg.stopChan:
 				// Final flush
 				if len(batch) > 0 {
@@ -255,18 +255,18 @@ func (pg *PersistentGraph) startAsyncWriter() {
 // executeBatch executes a batch of write operations
 func (pg *PersistentGraph) executeBatch(batch []writeOp) {
 	start := time.Now()
-	
+
 	for _, op := range batch {
 		pg.executeWriteOp(op)
 	}
-	
+
 	klog.V(4).Infof("Executed batch of %d writes in %v", len(batch), time.Since(start))
 }
 
 // executeWriteOp executes a single write operation
 func (pg *PersistentGraph) executeWriteOp(op writeOp) {
 	var err error
-	
+
 	switch op.opType {
 	case "saveNode":
 		err = pg.backend.SaveNode(op.node)
@@ -277,7 +277,7 @@ func (pg *PersistentGraph) executeWriteOp(op writeOp) {
 	case "deleteEdge":
 		err = pg.backend.DeleteEdge(op.uid, op.toUID)
 	}
-	
+
 	if err != nil {
 		klog.Errorf("Failed to execute %s: %v", op.opType, err)
 	}

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Astrolabe is designed as a lightweight, efficient Kubernetes state server that maintains an in-memory graph of cluster resources and their relationships. It replaces the need for the Grafana datasource plugin to directly query the Kubernetes API, providing better performance, lower cluster load, and richer relationship data.
+Astrolabe is a lightweight, efficient Kubernetes state server that maintains an in-memory graph of cluster resources and their relationships, reflecting the current state of a cluster.
 
 ## Core Components
 

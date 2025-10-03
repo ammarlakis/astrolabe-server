@@ -5,7 +5,6 @@ import (
 
 	"github.com/ammarlakis/astrolabe/pkg/graph"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/klog/v2"
 )
 
 // PodProcessor processes Pod resources
@@ -13,7 +12,7 @@ type PodProcessor struct {
 	*BaseProcessor
 }
 
-func NewPodProcessor(g GraphInterface) *PodProcessor {
+func NewPodProcessor(g graph.GraphInterface) *PodProcessor {
 	return &PodProcessor{BaseProcessor: NewBaseProcessor(g)}
 }
 
@@ -22,32 +21,32 @@ func (p *PodProcessor) Process(obj interface{}, eventType EventType) error {
 	if !ok {
 		return fmt.Errorf("expected Pod, got %T", obj)
 	}
-	
+
 	if eventType == EventDelete {
 		return p.handleDelete(pod, "Pod")
 	}
-	
+
 	node := graph.NewNodeFromObject(pod, "Pod", "v1")
 	node.Status, node.StatusMessage = p.getPodStatus(pod)
-	
+
 	// Set metadata
 	metadata := &graph.ResourceMetadata{
 		NodeName:     pod.Spec.NodeName,
 		RestartCount: p.getTotalRestartCount(pod),
 	}
-	
+
 	if len(pod.Spec.Containers) > 0 {
 		metadata.Image = pod.Spec.Containers[0].Image
 	}
-	
+
 	node.Metadata = metadata
-	
+
 	// Add node to graph
 	p.graph.AddNode(node)
-	
+
 	// Create ownership edges
 	p.createOwnershipEdges(node, pod.GetOwnerReferences())
-	
+
 	// Create edges to PVCs
 	for _, volume := range pod.Spec.Volumes {
 		if volume.PersistentVolumeClaim != nil {
@@ -56,17 +55,17 @@ func (p *PodProcessor) Process(obj interface{}, eventType EventType) error {
 			}
 		}
 	}
-	
+
 	// Create edges to ConfigMaps and Secrets
 	p.createConfigMapSecretEdges(node, &pod.Spec)
-	
+
 	// Create edge to ServiceAccount
 	if pod.Spec.ServiceAccountName != "" {
 		if saNode := p.findNodeByNamespaceKindName(pod.Namespace, "ServiceAccount", pod.Spec.ServiceAccountName); saNode != nil {
 			p.createEdgeIfNodeExists(node.UID, saNode.UID, graph.EdgeServiceAccount)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -111,7 +110,7 @@ type ServiceProcessor struct {
 	*BaseProcessor
 }
 
-func NewServiceProcessor(g GraphInterface) *ServiceProcessor {
+func NewServiceProcessor(g graph.GraphInterface) *ServiceProcessor {
 	return &ServiceProcessor{BaseProcessor: NewBaseProcessor(g)}
 }
 
@@ -120,23 +119,23 @@ func (p *ServiceProcessor) Process(obj interface{}, eventType EventType) error {
 	if !ok {
 		return fmt.Errorf("expected Service, got %T", obj)
 	}
-	
+
 	if eventType == EventDelete {
 		return p.handleDelete(service, "Service")
 	}
-	
+
 	node := graph.NewNodeFromObject(service, "Service", "v1")
 	node.Status = graph.StatusReady
 	node.StatusMessage = "Service is active"
-	
+
 	node.Metadata = &graph.ResourceMetadata{
 		ClusterIP:   service.Spec.ClusterIP,
 		ServiceType: string(service.Spec.Type),
 	}
-	
+
 	p.graph.AddNode(node)
 	p.createOwnershipEdges(node, service.GetOwnerReferences())
-	
+
 	// Create edges to Pods via selector
 	if len(service.Spec.Selector) > 0 {
 		pods := p.findNodesByLabelSelector(service.Namespace, "Pod", service.Spec.Selector)
@@ -144,7 +143,7 @@ func (p *ServiceProcessor) Process(obj interface{}, eventType EventType) error {
 			p.createEdgeIfNodeExists(node.UID, pod.UID, graph.EdgeServiceSelector)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -153,7 +152,7 @@ type ServiceAccountProcessor struct {
 	*BaseProcessor
 }
 
-func NewServiceAccountProcessor(g GraphInterface) *ServiceAccountProcessor {
+func NewServiceAccountProcessor(g graph.GraphInterface) *ServiceAccountProcessor {
 	return &ServiceAccountProcessor{BaseProcessor: NewBaseProcessor(g)}
 }
 
@@ -162,18 +161,18 @@ func (p *ServiceAccountProcessor) Process(obj interface{}, eventType EventType) 
 	if !ok {
 		return fmt.Errorf("expected ServiceAccount, got %T", obj)
 	}
-	
+
 	if eventType == EventDelete {
 		return p.handleDelete(sa, "ServiceAccount")
 	}
-	
+
 	node := graph.NewNodeFromObject(sa, "ServiceAccount", "v1")
 	node.Status = graph.StatusReady
 	node.StatusMessage = "ServiceAccount exists"
-	
+
 	p.graph.AddNode(node)
 	p.createOwnershipEdges(node, sa.GetOwnerReferences())
-	
+
 	return nil
 }
 
@@ -182,7 +181,7 @@ type ConfigMapProcessor struct {
 	*BaseProcessor
 }
 
-func NewConfigMapProcessor(g GraphInterface) *ConfigMapProcessor {
+func NewConfigMapProcessor(g graph.GraphInterface) *ConfigMapProcessor {
 	return &ConfigMapProcessor{BaseProcessor: NewBaseProcessor(g)}
 }
 
@@ -191,18 +190,18 @@ func (p *ConfigMapProcessor) Process(obj interface{}, eventType EventType) error
 	if !ok {
 		return fmt.Errorf("expected ConfigMap, got %T", obj)
 	}
-	
+
 	if eventType == EventDelete {
 		return p.handleDelete(cm, "ConfigMap")
 	}
-	
+
 	node := graph.NewNodeFromObject(cm, "ConfigMap", "v1")
 	node.Status = graph.StatusReady
 	node.StatusMessage = "ConfigMap exists"
-	
+
 	p.graph.AddNode(node)
 	p.createOwnershipEdges(node, cm.GetOwnerReferences())
-	
+
 	return nil
 }
 
@@ -211,7 +210,7 @@ type SecretProcessor struct {
 	*BaseProcessor
 }
 
-func NewSecretProcessor(g GraphInterface) *SecretProcessor {
+func NewSecretProcessor(g graph.GraphInterface) *SecretProcessor {
 	return &SecretProcessor{BaseProcessor: NewBaseProcessor(g)}
 }
 
@@ -220,25 +219,18 @@ func (p *SecretProcessor) Process(obj interface{}, eventType EventType) error {
 	if !ok {
 		return fmt.Errorf("expected Secret, got %T", obj)
 	}
-	
+
 	if eventType == EventDelete {
 		return p.handleDelete(secret, "Secret")
 	}
-	
+
 	node := graph.NewNodeFromObject(secret, "Secret", "v1")
 	node.Status = graph.StatusReady
 	node.StatusMessage = "Secret exists"
-	
-	// Check if this is a Helm release secret
-	if secret.Type == "helm.sh/release.v1" {
-		klog.V(3).Infof("Processing Helm release secret: %s/%s", secret.Namespace, secret.Name)
-		// Extract release name from secret name (format: sh.helm.release.v1.<release-name>.v<version>)
-		// We can parse this if needed for better Helm integration
-	}
-	
+
 	p.graph.AddNode(node)
 	p.createOwnershipEdges(node, secret.GetOwnerReferences())
-	
+
 	return nil
 }
 
@@ -247,7 +239,7 @@ type PVCProcessor struct {
 	*BaseProcessor
 }
 
-func NewPVCProcessor(g GraphInterface) *PVCProcessor {
+func NewPVCProcessor(g graph.GraphInterface) *PVCProcessor {
 	return &PVCProcessor{BaseProcessor: NewBaseProcessor(g)}
 }
 
@@ -256,28 +248,28 @@ func (p *PVCProcessor) Process(obj interface{}, eventType EventType) error {
 	if !ok {
 		return fmt.Errorf("expected PersistentVolumeClaim, got %T", obj)
 	}
-	
+
 	if eventType == EventDelete {
 		return p.handleDelete(pvc, "PersistentVolumeClaim")
 	}
-	
+
 	node := graph.NewNodeFromObject(pvc, "PersistentVolumeClaim", "v1")
 	node.Status, node.StatusMessage = p.getPVCStatus(pvc)
-	
+
 	node.Metadata = &graph.ResourceMetadata{
 		VolumeName: pvc.Spec.VolumeName,
 	}
-	
+
 	p.graph.AddNode(node)
 	p.createOwnershipEdges(node, pvc.GetOwnerReferences())
-	
+
 	// Create edge to PV if bound
 	if pvc.Spec.VolumeName != "" {
 		if pvNode := p.findNodeByNamespaceKindName("", "PersistentVolume", pvc.Spec.VolumeName); pvNode != nil {
 			p.createEdgeIfNodeExists(node.UID, pvNode.UID, graph.EdgePVCBinding)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -299,7 +291,7 @@ type PVProcessor struct {
 	*BaseProcessor
 }
 
-func NewPVProcessor(g GraphInterface) *PVProcessor {
+func NewPVProcessor(g graph.GraphInterface) *PVProcessor {
 	return &PVProcessor{BaseProcessor: NewBaseProcessor(g)}
 }
 
@@ -308,14 +300,14 @@ func (p *PVProcessor) Process(obj interface{}, eventType EventType) error {
 	if !ok {
 		return fmt.Errorf("expected PersistentVolume, got %T", obj)
 	}
-	
+
 	if eventType == EventDelete {
 		return p.handleDelete(pv, "PersistentVolume")
 	}
-	
+
 	node := graph.NewNodeFromObject(pv, "PersistentVolume", "v1")
 	node.Status, node.StatusMessage = p.getPVStatus(pv)
-	
+
 	// Set claim reference if bound
 	if pv.Spec.ClaimRef != nil {
 		node.Metadata = &graph.ResourceMetadata{
@@ -327,10 +319,10 @@ func (p *PVProcessor) Process(obj interface{}, eventType EventType) error {
 			},
 		}
 	}
-	
+
 	p.graph.AddNode(node)
 	p.createOwnershipEdges(node, pv.GetOwnerReferences())
-	
+
 	return nil
 }
 
@@ -354,7 +346,7 @@ type NamespaceProcessor struct {
 	*BaseProcessor
 }
 
-func NewNamespaceProcessor(g GraphInterface) *NamespaceProcessor {
+func NewNamespaceProcessor(g graph.GraphInterface) *NamespaceProcessor {
 	return &NamespaceProcessor{BaseProcessor: NewBaseProcessor(g)}
 }
 
@@ -363,13 +355,13 @@ func (p *NamespaceProcessor) Process(obj interface{}, eventType EventType) error
 	if !ok {
 		return fmt.Errorf("expected Namespace, got %T", obj)
 	}
-	
+
 	if eventType == EventDelete {
 		return p.handleDelete(ns, "Namespace")
 	}
-	
+
 	node := graph.NewNodeFromObject(ns, "Namespace", "v1")
-	
+
 	switch ns.Status.Phase {
 	case corev1.NamespaceActive:
 		node.Status = graph.StatusReady
@@ -381,9 +373,9 @@ func (p *NamespaceProcessor) Process(obj interface{}, eventType EventType) error
 		node.Status = graph.StatusUnknown
 		node.StatusMessage = fmt.Sprintf("Phase: %s", ns.Status.Phase)
 	}
-	
+
 	p.graph.AddNode(node)
-	
+
 	return nil
 }
 
@@ -402,7 +394,7 @@ func (p *BaseProcessor) createConfigMapSecretEdges(node *graph.Node, podSpec *co
 			}
 		}
 	}
-	
+
 	// From containers
 	for _, container := range podSpec.Containers {
 		// From envFrom
@@ -418,7 +410,7 @@ func (p *BaseProcessor) createConfigMapSecretEdges(node *graph.Node, podSpec *co
 				}
 			}
 		}
-		
+
 		// From env
 		for _, env := range container.Env {
 			if env.ValueFrom != nil {

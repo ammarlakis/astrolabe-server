@@ -21,59 +21,59 @@ const (
 
 // Node represents a Kubernetes resource in the graph
 type Node struct {
-	UID               types.UID              `json:"uid"`
-	Name              string                 `json:"name"`
-	Namespace         string                 `json:"namespace"`
-	Kind              string                 `json:"kind"`
-	APIVersion        string                 `json:"apiVersion"`
-	ResourceVersion   string                 `json:"resourceVersion"`
-	Labels            map[string]string      `json:"labels"`
-	Annotations       map[string]string      `json:"annotations"`
-	CreationTimestamp time.Time              `json:"creationTimestamp"`
-	Status            ResourceStatus         `json:"status"`
-	StatusMessage     string                 `json:"statusMessage"`
-	
+	UID               types.UID         `json:"uid"`
+	Name              string            `json:"name"`
+	Namespace         string            `json:"namespace"`
+	Kind              string            `json:"kind"`
+	APIVersion        string            `json:"apiVersion"`
+	ResourceVersion   string            `json:"resourceVersion"`
+	Labels            map[string]string `json:"labels"`
+	Annotations       map[string]string `json:"annotations"`
+	CreationTimestamp time.Time         `json:"creationTimestamp"`
+	Status            ResourceStatus    `json:"status"`
+	StatusMessage     string            `json:"statusMessage"`
+
 	// Helm-specific fields
-	HelmChart         string                 `json:"helmChart,omitempty"`
-	HelmRelease       string                 `json:"helmRelease,omitempty"`
-	
+	HelmChart   string `json:"helmChart,omitempty"`
+	HelmRelease string `json:"helmRelease,omitempty"`
+
 	// Resource-specific metadata
-	Metadata          *ResourceMetadata      `json:"metadata,omitempty"`
-	
+	Metadata *ResourceMetadata `json:"metadata,omitempty"`
+
 	// Graph edges (stored as UIDs for efficient lookups)
-	OutgoingEdges     map[types.UID]*Edge    `json:"-"` // Edges from this node
-	IncomingEdges     map[types.UID]*Edge    `json:"-"` // Edges to this node
+	OutgoingEdges map[types.UID]*Edge `json:"-"` // Edges from this node
+	IncomingEdges map[types.UID]*Edge `json:"-"` // Edges to this node
 }
 
 // ResourceMetadata contains resource-specific metadata
 type ResourceMetadata struct {
 	// Pod-specific
-	NodeName          string                 `json:"nodeName,omitempty"`
-	Image             string                 `json:"image,omitempty"`
-	RestartCount      int                    `json:"restartCount,omitempty"`
-	
+	NodeName     string `json:"nodeName,omitempty"`
+	Image        string `json:"image,omitempty"`
+	RestartCount int    `json:"restartCount,omitempty"`
+
 	// Workload-specific (Deployment, StatefulSet, etc.)
-	Replicas          *ReplicaInfo           `json:"replicas,omitempty"`
-	
+	Replicas *ReplicaInfo `json:"replicas,omitempty"`
+
 	// PVC-specific
-	VolumeName        string                 `json:"volumeName,omitempty"`
-	
+	VolumeName string `json:"volumeName,omitempty"`
+
 	// PV-specific
-	ClaimRef          *ObjectReference       `json:"claimRef,omitempty"`
-	
+	ClaimRef *ObjectReference `json:"claimRef,omitempty"`
+
 	// Service-specific
-	ClusterIP         string                 `json:"clusterIP,omitempty"`
-	ServiceType       string                 `json:"serviceType,omitempty"`
-	
+	ClusterIP   string `json:"clusterIP,omitempty"`
+	ServiceType string `json:"serviceType,omitempty"`
+
 	// Ingress-specific
-	IngressClass      string                 `json:"ingressClass,omitempty"`
-	
+	IngressClass string `json:"ingressClass,omitempty"`
+
 	// HPA-specific
-	ScaleTargetRef    *ObjectReference       `json:"scaleTargetRef,omitempty"`
-	MinReplicas       *int32                 `json:"minReplicas,omitempty"`
-	MaxReplicas       int32                  `json:"maxReplicas,omitempty"`
-	CurrentReplicas   int32                  `json:"currentReplicas,omitempty"`
-	DesiredReplicas   int32                  `json:"desiredReplicas,omitempty"`
+	ScaleTargetRef  *ObjectReference `json:"scaleTargetRef,omitempty"`
+	MinReplicas     *int32           `json:"minReplicas,omitempty"`
+	MaxReplicas     int32            `json:"maxReplicas,omitempty"`
+	CurrentReplicas int32            `json:"currentReplicas,omitempty"`
+	DesiredReplicas int32            `json:"desiredReplicas,omitempty"`
 }
 
 // ReplicaInfo contains replica information for workload resources
@@ -86,9 +86,9 @@ type ReplicaInfo struct {
 
 // ObjectReference is a simplified reference to another object
 type ObjectReference struct {
-	Kind      string `json:"kind"`
-	Namespace string `json:"namespace,omitempty"`
-	Name      string `json:"name"`
+	Kind      string    `json:"kind"`
+	Namespace string    `json:"namespace,omitempty"`
+	Name      string    `json:"name"`
 	UID       types.UID `json:"uid,omitempty"`
 }
 
@@ -97,49 +97,49 @@ type EdgeType string
 
 const (
 	// Ownership edges
-	EdgeOwnership        EdgeType = "owns"           // Deployment -> ReplicaSet -> Pod
-	
+	EdgeOwnership EdgeType = "owns" // Deployment -> ReplicaSet -> Pod
+
 	// Service edges
-	EdgeServiceSelector  EdgeType = "selects"        // Service -> Pod (via selector)
-	EdgeServiceEndpoint  EdgeType = "endpoints"      // Service -> EndpointSlice
-	
+	EdgeServiceSelector EdgeType = "selects"   // Service -> Pod (via selector)
+	EdgeServiceEndpoint EdgeType = "endpoints" // Service -> EndpointSlice
+
 	// Ingress edges
-	EdgeIngressBackend   EdgeType = "routes-to"      // Ingress -> Service
-	
+	EdgeIngressBackend EdgeType = "routes-to" // Ingress -> Service
+
 	// Volume edges
-	EdgePodVolume        EdgeType = "mounts"         // Pod -> PVC
-	EdgePVCBinding       EdgeType = "binds"          // PVC -> PV
-	
+	EdgePodVolume  EdgeType = "mounts" // Pod -> PVC
+	EdgePVCBinding EdgeType = "binds"  // PVC -> PV
+
 	// ConfigMap/Secret edges
-	EdgeConfigMapRef     EdgeType = "uses-configmap" // Pod/Workload -> ConfigMap
-	EdgeSecretRef        EdgeType = "uses-secret"    // Pod/Workload -> Secret
-	
+	EdgeConfigMapRef EdgeType = "uses-configmap" // Pod/Workload -> ConfigMap
+	EdgeSecretRef    EdgeType = "uses-secret"    // Pod/Workload -> Secret
+
 	// ServiceAccount edges
-	EdgeServiceAccount   EdgeType = "uses-sa"        // Pod/Workload -> ServiceAccount
-	
+	EdgeServiceAccount EdgeType = "uses-sa" // Pod/Workload -> ServiceAccount
+
 	// HPA edges
-	EdgeHPATarget        EdgeType = "scales"         // HPA -> Deployment/StatefulSet
+	EdgeHPATarget EdgeType = "scales" // HPA -> Deployment/StatefulSet
 )
 
 // Edge represents a relationship between two resources
 type Edge struct {
-	Type       EdgeType  `json:"type"`
-	FromUID    types.UID `json:"fromUID"`
-	ToUID      types.UID `json:"toUID"`
-	Metadata   map[string]string `json:"metadata,omitempty"` // Additional edge metadata
+	Type     EdgeType          `json:"type"`
+	FromUID  types.UID         `json:"fromUID"`
+	ToUID    types.UID         `json:"toUID"`
+	Metadata map[string]string `json:"metadata,omitempty"` // Additional edge metadata
 }
 
 // Graph represents the in-memory resource graph
 type Graph struct {
 	mu    sync.RWMutex
 	nodes map[types.UID]*Node
-	
+
 	// Index by namespace and kind for efficient queries
 	byNamespaceKind map[string]map[string][]*Node // namespace -> kind -> nodes
-	
+
 	// Index by Helm release for efficient queries
 	byHelmRelease map[string][]*Node // release name -> nodes
-	
+
 	// Index by labels for efficient selector queries
 	byLabel map[string]map[string][]*Node // label key -> label value -> nodes
 }
@@ -158,15 +158,15 @@ func NewGraph() *Graph {
 func (g *Graph) AddNode(node *Node) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	
+
 	// Check if this is an update or new node
 	_, isUpdate := g.nodes[node.UID]
-	
+
 	// Remove old node from indexes if it exists
 	if oldNode, exists := g.nodes[node.UID]; exists {
 		g.removeFromIndexes(oldNode)
 	}
-	
+
 	// Initialize edge maps if nil
 	if node.OutgoingEdges == nil {
 		node.OutgoingEdges = make(map[types.UID]*Edge)
@@ -174,13 +174,13 @@ func (g *Graph) AddNode(node *Node) {
 	if node.IncomingEdges == nil {
 		node.IncomingEdges = make(map[types.UID]*Edge)
 	}
-	
+
 	// Add to main map
 	g.nodes[node.UID] = node
-	
+
 	// Add to indexes
 	g.addToIndexes(node)
-	
+
 	// Log the operation
 	if isUpdate {
 		klog.V(3).Infof("Graph: UPDATED %s/%s (release: %s, status: %s)", node.Kind, node.Name, node.HelmRelease, node.Status)
@@ -193,12 +193,12 @@ func (g *Graph) AddNode(node *Node) {
 func (g *Graph) RemoveNode(uid types.UID) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	
+
 	node, exists := g.nodes[uid]
 	if !exists {
 		return
 	}
-	
+
 	// Remove all edges connected to this node
 	for _, edge := range node.OutgoingEdges {
 		if toNode, exists := g.nodes[edge.ToUID]; exists {
@@ -210,10 +210,10 @@ func (g *Graph) RemoveNode(uid types.UID) {
 			delete(fromNode.OutgoingEdges, uid)
 		}
 	}
-	
+
 	// Remove from indexes
 	g.removeFromIndexes(node)
-	
+
 	// Remove from main map
 	delete(g.nodes, uid)
 }
@@ -230,17 +230,17 @@ func (g *Graph) GetNode(uid types.UID) (*Node, bool) {
 func (g *Graph) AddEdge(edge *Edge) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	
+
 	fromNode, fromExists := g.nodes[edge.FromUID]
 	toNode, toExists := g.nodes[edge.ToUID]
-	
+
 	if !fromExists || !toExists {
 		return false
 	}
-	
+
 	fromNode.OutgoingEdges[edge.ToUID] = edge
 	toNode.IncomingEdges[edge.FromUID] = edge
-	
+
 	return true
 }
 
@@ -248,11 +248,11 @@ func (g *Graph) AddEdge(edge *Edge) bool {
 func (g *Graph) RemoveEdge(fromUID, toUID types.UID) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	
+
 	if fromNode, exists := g.nodes[fromUID]; exists {
 		delete(fromNode.OutgoingEdges, toUID)
 	}
-	
+
 	if toNode, exists := g.nodes[toUID]; exists {
 		delete(toNode.IncomingEdges, fromUID)
 	}
@@ -262,8 +262,13 @@ func (g *Graph) RemoveEdge(fromUID, toUID types.UID) {
 func (g *Graph) GetNodesByNamespaceKind(namespace, kind string) []*Node {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
-	
-	if kindMap, exists := g.byNamespaceKind[namespace]; exists {
+
+	nsKey := namespace
+	if nsKey == "" {
+		nsKey = "_cluster"
+	}
+
+	if kindMap, exists := g.byNamespaceKind[nsKey]; exists {
 		if nodes, exists := kindMap[kind]; exists {
 			// Return a copy to avoid concurrent modification
 			result := make([]*Node, len(nodes))
@@ -278,7 +283,7 @@ func (g *Graph) GetNodesByNamespaceKind(namespace, kind string) []*Node {
 func (g *Graph) GetNodesByHelmRelease(release string) []*Node {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
-	
+
 	if nodes, exists := g.byHelmRelease[release]; exists {
 		// Return a copy to avoid concurrent modification
 		result := make([]*Node, len(nodes))
@@ -292,15 +297,15 @@ func (g *Graph) GetNodesByHelmRelease(release string) []*Node {
 func (g *Graph) GetNodesByLabelSelector(selector map[string]string) []*Node {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
-	
+
 	if len(selector) == 0 {
 		return nil
 	}
-	
+
 	// Start with nodes matching the first label
 	var candidates []*Node
 	first := true
-	
+
 	for key, value := range selector {
 		if valueMap, exists := g.byLabel[key]; exists {
 			if nodes, exists := valueMap[value]; exists {
@@ -319,7 +324,7 @@ func (g *Graph) GetNodesByLabelSelector(selector map[string]string) []*Node {
 			return nil // No nodes have this label key
 		}
 	}
-	
+
 	return candidates
 }
 
@@ -327,7 +332,7 @@ func (g *Graph) GetNodesByLabelSelector(selector map[string]string) []*Node {
 func (g *Graph) GetAllNodes() []*Node {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
-	
+
 	nodes := make([]*Node, 0, len(g.nodes))
 	for _, node := range g.nodes {
 		nodes = append(nodes, node)
@@ -339,7 +344,7 @@ func (g *Graph) GetAllNodes() []*Node {
 func (g *Graph) GetAllHelmReleases() []string {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
-	
+
 	releases := make([]string, 0, len(g.byHelmRelease))
 	for release := range g.byHelmRelease {
 		if release != "" {
@@ -353,14 +358,14 @@ func (g *Graph) GetAllHelmReleases() []string {
 func (g *Graph) GetAllHelmCharts() []string {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
-	
+
 	charts := make(map[string]bool)
 	for _, node := range g.nodes {
 		if node.HelmChart != "" {
 			charts[node.HelmChart] = true
 		}
 	}
-	
+
 	result := make([]string, 0, len(charts))
 	for chart := range charts {
 		result = append(result, chart)
@@ -376,17 +381,17 @@ func (g *Graph) addToIndexes(node *Node) {
 	if nsKey == "" {
 		nsKey = "_cluster" // For cluster-scoped resources
 	}
-	
+
 	if _, exists := g.byNamespaceKind[nsKey]; !exists {
 		g.byNamespaceKind[nsKey] = make(map[string][]*Node)
 	}
 	g.byNamespaceKind[nsKey][node.Kind] = append(g.byNamespaceKind[nsKey][node.Kind], node)
-	
+
 	// Add to Helm release index
 	if node.HelmRelease != "" {
 		g.byHelmRelease[node.HelmRelease] = append(g.byHelmRelease[node.HelmRelease], node)
 	}
-	
+
 	// Add to label index
 	for key, value := range node.Labels {
 		if _, exists := g.byLabel[key]; !exists {
@@ -402,7 +407,7 @@ func (g *Graph) removeFromIndexes(node *Node) {
 	if nsKey == "" {
 		nsKey = "_cluster"
 	}
-	
+
 	if kindMap, exists := g.byNamespaceKind[nsKey]; exists {
 		if nodes, exists := kindMap[node.Kind]; exists {
 			kindMap[node.Kind] = g.removeNodeFromSlice(nodes, node.UID)
@@ -414,7 +419,7 @@ func (g *Graph) removeFromIndexes(node *Node) {
 			delete(g.byNamespaceKind, nsKey)
 		}
 	}
-	
+
 	// Remove from Helm release index
 	if node.HelmRelease != "" {
 		if nodes, exists := g.byHelmRelease[node.HelmRelease]; exists {
@@ -424,7 +429,7 @@ func (g *Graph) removeFromIndexes(node *Node) {
 			}
 		}
 	}
-	
+
 	// Remove from label index
 	for key, value := range node.Labels {
 		if valueMap, exists := g.byLabel[key]; exists {
@@ -455,7 +460,7 @@ func (g *Graph) intersectNodes(a, b []*Node) []*Node {
 	for _, node := range a {
 		uidMap[node.UID] = true
 	}
-	
+
 	result := make([]*Node, 0)
 	for _, node := range b {
 		if uidMap[node.UID] {
@@ -471,12 +476,12 @@ func NewNodeFromObject(obj metav1.Object, kind, apiVersion string) *Node {
 	if labels == nil {
 		labels = make(map[string]string)
 	}
-	
+
 	annotations := obj.GetAnnotations()
 	if annotations == nil {
 		annotations = make(map[string]string)
 	}
-	
+
 	node := &Node{
 		UID:               obj.GetUID(),
 		Name:              obj.GetName(),
@@ -491,19 +496,28 @@ func NewNodeFromObject(obj metav1.Object, kind, apiVersion string) *Node {
 		OutgoingEdges:     make(map[types.UID]*Edge),
 		IncomingEdges:     make(map[types.UID]*Edge),
 	}
-	
+
 	// Extract Helm information from labels/annotations
-	if chart, ok := labels["helm.sh/chart"]; ok {
-		node.HelmChart = chart
-	} else if chart, ok := annotations["helm.sh/chart"]; ok {
+	if chart, ok := annotations["helm.sh/chart"]; ok {
 		node.HelmChart = chart
 	}
-	
-	if release, ok := labels["app.kubernetes.io/instance"]; ok {
-		node.HelmRelease = release
-	} else if release, ok := annotations["meta.helm.sh/release-name"]; ok {
+
+	if release, ok := annotations["meta.helm.sh/release-name"]; ok {
 		node.HelmRelease = release
 	}
-	
+
 	return node
+}
+
+type GraphInterface interface {
+	GetNode(uid types.UID) (*Node, bool)
+	GetAllNodes() []*Node
+	GetNodesByNamespaceKind(namespace, kind string) []*Node
+	GetNodesByHelmRelease(release string) []*Node
+	GetAllHelmReleases() []string
+	GetAllHelmCharts() []string
+	AddNode(node *Node)
+	RemoveNode(uid types.UID)
+	AddEdge(edge *Edge) bool
+	RemoveEdge(fromUID, toUID types.UID)
 }

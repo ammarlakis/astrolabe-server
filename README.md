@@ -221,6 +221,8 @@ Query Parameters:
 
 Response: Array of resources compatible with Grafana datasource format
 
+When filtering by `release`, the API now automatically includes `PersistentVolume` resources that are bound to any `PersistentVolumeClaim` in the release. This ensures storage resources that are cluster-scoped still appear alongside their associated release.
+
 ### Get Releases
 
 ```
