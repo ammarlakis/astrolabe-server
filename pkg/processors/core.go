@@ -51,9 +51,7 @@ func (p *PodProcessor) Process(obj interface{}, eventType EventType) error {
 	// Create edges to PVCs
 	for _, volume := range pod.Spec.Volumes {
 		if volume.PersistentVolumeClaim != nil {
-			if pvcNode := p.findNodeByNamespaceKindName(pod.Namespace, "PersistentVolumeClaim", volume.PersistentVolumeClaim.ClaimName); pvcNode != nil {
-				p.createEdgeIfNodeExists(node.UID, pvcNode.UID, graph.EdgePodVolume)
-			}
+			p.createEdgeOrPending(node.UID, pod.Namespace, "PersistentVolumeClaim", volume.PersistentVolumeClaim.ClaimName, graph.EdgePodVolume)
 		}
 	}
 
@@ -62,9 +60,7 @@ func (p *PodProcessor) Process(obj interface{}, eventType EventType) error {
 
 	// Create edge to ServiceAccount
 	if pod.Spec.ServiceAccountName != "" {
-		if saNode := p.findNodeByNamespaceKindName(pod.Namespace, "ServiceAccount", pod.Spec.ServiceAccountName); saNode != nil {
-			p.createEdgeIfNodeExists(node.UID, saNode.UID, graph.EdgeServiceAccount)
-		}
+		p.createEdgeOrPending(node.UID, pod.Namespace, "ServiceAccount", pod.Spec.ServiceAccountName, graph.EdgeServiceAccount)
 	}
 
 	return nil
@@ -137,13 +133,11 @@ func (p *ServiceProcessor) Process(obj interface{}, eventType EventType) error {
 	p.graph.AddNode(node)
 	p.createOwnershipEdges(node, service.GetOwnerReferences())
 
-	// Create edges to Pods via selector
-	if len(service.Spec.Selector) > 0 {
-		pods := p.findNodesByLabelSelector(service.Namespace, "Pod", service.Spec.Selector)
-		for _, pod := range pods {
-			p.createEdgeIfNodeExists(node.UID, pod.UID, graph.EdgeServiceSelector)
-		}
-	}
+	// Note: We do NOT create direct Service -> Pod edges here.
+	// The EndpointSlice processor will create Service -> EndpointSlice -> Pod edges,
+	// which is the correct Kubernetes model.
+	// Direct Service -> Pod edges via selector are only created as a fallback
+	// if no EndpointSlices exist (handled later in the processing pipeline).
 
 	return nil
 }
@@ -273,9 +267,7 @@ func (p *PVCProcessor) Process(obj interface{}, eventType EventType) error {
 
 	// Create edge to PV if bound
 	if pvc.Spec.VolumeName != "" {
-		if pvNode := p.findNodeByNamespaceKindName("", "PersistentVolume", pvc.Spec.VolumeName); pvNode != nil {
-			p.createEdgeIfNodeExists(node.UID, pvNode.UID, graph.EdgePVCBinding)
-		}
+		p.createEdgeOrPending(node.UID, "", "PersistentVolume", pvc.Spec.VolumeName, graph.EdgePVCBinding)
 	}
 
 	return nil
@@ -392,14 +384,10 @@ func (p *BaseProcessor) createConfigMapSecretEdges(node *graph.Node, podSpec *co
 	// From volumes
 	for _, volume := range podSpec.Volumes {
 		if volume.ConfigMap != nil {
-			if cmNode := p.findNodeByNamespaceKindName(node.Namespace, "ConfigMap", volume.ConfigMap.Name); cmNode != nil {
-				p.createEdgeIfNodeExists(node.UID, cmNode.UID, graph.EdgeConfigMapRef)
-			}
+			p.createEdgeOrPending(node.UID, node.Namespace, "ConfigMap", volume.ConfigMap.Name, graph.EdgeConfigMapRef)
 		}
 		if volume.Secret != nil {
-			if secretNode := p.findNodeByNamespaceKindName(node.Namespace, "Secret", volume.Secret.SecretName); secretNode != nil {
-				p.createEdgeIfNodeExists(node.UID, secretNode.UID, graph.EdgeSecretRef)
-			}
+			p.createEdgeOrPending(node.UID, node.Namespace, "Secret", volume.Secret.SecretName, graph.EdgeSecretRef)
 		}
 	}
 
@@ -408,14 +396,10 @@ func (p *BaseProcessor) createConfigMapSecretEdges(node *graph.Node, podSpec *co
 		// From envFrom
 		for _, envFrom := range container.EnvFrom {
 			if envFrom.ConfigMapRef != nil {
-				if cmNode := p.findNodeByNamespaceKindName(node.Namespace, "ConfigMap", envFrom.ConfigMapRef.Name); cmNode != nil {
-					p.createEdgeIfNodeExists(node.UID, cmNode.UID, graph.EdgeConfigMapRef)
-				}
+				p.createEdgeOrPending(node.UID, node.Namespace, "ConfigMap", envFrom.ConfigMapRef.Name, graph.EdgeConfigMapRef)
 			}
 			if envFrom.SecretRef != nil {
-				if secretNode := p.findNodeByNamespaceKindName(node.Namespace, "Secret", envFrom.SecretRef.Name); secretNode != nil {
-					p.createEdgeIfNodeExists(node.UID, secretNode.UID, graph.EdgeSecretRef)
-				}
+				p.createEdgeOrPending(node.UID, node.Namespace, "Secret", envFrom.SecretRef.Name, graph.EdgeSecretRef)
 			}
 		}
 
@@ -423,14 +407,10 @@ func (p *BaseProcessor) createConfigMapSecretEdges(node *graph.Node, podSpec *co
 		for _, env := range container.Env {
 			if env.ValueFrom != nil {
 				if env.ValueFrom.ConfigMapKeyRef != nil {
-					if cmNode := p.findNodeByNamespaceKindName(node.Namespace, "ConfigMap", env.ValueFrom.ConfigMapKeyRef.Name); cmNode != nil {
-						p.createEdgeIfNodeExists(node.UID, cmNode.UID, graph.EdgeConfigMapRef)
-					}
+					p.createEdgeOrPending(node.UID, node.Namespace, "ConfigMap", env.ValueFrom.ConfigMapKeyRef.Name, graph.EdgeConfigMapRef)
 				}
 				if env.ValueFrom.SecretKeyRef != nil {
-					if secretNode := p.findNodeByNamespaceKindName(node.Namespace, "Secret", env.ValueFrom.SecretKeyRef.Name); secretNode != nil {
-						p.createEdgeIfNodeExists(node.UID, secretNode.UID, graph.EdgeSecretRef)
-					}
+					p.createEdgeOrPending(node.UID, node.Namespace, "Secret", env.ValueFrom.SecretKeyRef.Name, graph.EdgeSecretRef)
 				}
 			}
 		}

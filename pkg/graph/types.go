@@ -5,6 +5,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 )
@@ -129,6 +130,13 @@ type Edge struct {
 	Metadata map[string]string `json:"metadata,omitempty"` // Additional edge metadata
 }
 
+// PendingEdge represents an edge waiting for a target resource to be created
+type PendingEdge struct {
+	FromUID    types.UID
+	TargetRef  RefKey
+	EdgeType   EdgeType
+}
+
 // Graph represents the in-memory resource graph
 type Graph struct {
 	mu    sync.RWMutex
@@ -142,6 +150,9 @@ type Graph struct {
 
 	// Index by labels for efficient selector queries
 	byLabel map[string]map[string][]*Node // label key -> label value -> nodes
+
+	// Pending edges waiting for target resources to be created
+	pendingEdges map[RefKey][]PendingEdge // target ref -> pending edges
 }
 
 // NewGraph creates a new empty graph
@@ -151,6 +162,7 @@ func NewGraph() *Graph {
 		byNamespaceKind: make(map[string]map[string][]*Node),
 		byHelmRelease:   make(map[string][]*Node),
 		byLabel:         make(map[string]map[string][]*Node),
+		pendingEdges:    make(map[RefKey][]PendingEdge),
 	}
 }
 
@@ -180,6 +192,11 @@ func (g *Graph) AddNode(node *Node) {
 
 	// Add to indexes
 	g.addToIndexes(node)
+
+	// Check for pending edges targeting this node
+	if !isUpdate {
+		g.processPendingEdgesForNode(node)
+	}
 
 	// Log the operation
 	if isUpdate {
@@ -520,4 +537,72 @@ type GraphInterface interface {
 	RemoveNode(uid types.UID)
 	AddEdge(edge *Edge) bool
 	RemoveEdge(fromUID, toUID types.UID)
+	AddPendingEdge(fromUID types.UID, targetRef RefKey, edgeType EdgeType)
+}
+
+type RefKey struct {
+	GVK       schema.GroupVersionKind
+	Namespace string
+	Name      string
+}
+
+// processPendingEdgesForNode checks if any pending edges are waiting for this node
+// and creates them if found. Must be called with lock held.
+func (g *Graph) processPendingEdgesForNode(node *Node) {
+	// Create a RefKey for this node
+	gvk := schema.GroupVersionKind{
+		Group:   "", // Will be filled based on kind
+		Version: node.APIVersion,
+		Kind:    node.Kind,
+	}
+	
+	refKey := RefKey{
+		GVK:       gvk,
+		Namespace: node.Namespace,
+		Name:      node.Name,
+	}
+	
+	// Check if there are pending edges for this node
+	if pendingList, exists := g.pendingEdges[refKey]; exists {
+		klog.V(2).Infof("Found %d pending edge(s) for %s/%s", len(pendingList), node.Kind, node.Name)
+		
+		for _, pending := range pendingList {
+			// Create the edge
+			edge := &Edge{
+				Type:    pending.EdgeType,
+				FromUID: pending.FromUID,
+				ToUID:   node.UID,
+			}
+			
+			// Add edge to both nodes
+			if fromNode, exists := g.nodes[pending.FromUID]; exists {
+				fromNode.OutgoingEdges[node.UID] = edge
+				node.IncomingEdges[pending.FromUID] = edge
+				klog.V(2).Infof("Created pending edge: %s/%s -> %s/%s", 
+					fromNode.Kind, fromNode.Name, node.Kind, node.Name)
+			}
+		}
+		
+		// Remove from pending edges
+		delete(g.pendingEdges, refKey)
+	}
+}
+
+// AddPendingEdge adds an edge to the pending list if the target doesn't exist yet
+func (g *Graph) AddPendingEdge(fromUID types.UID, targetRef RefKey, edgeType EdgeType) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	
+	pending := PendingEdge{
+		FromUID:   fromUID,
+		TargetRef: targetRef,
+		EdgeType:  edgeType,
+	}
+	
+	g.pendingEdges[targetRef] = append(g.pendingEdges[targetRef], pending)
+	
+	if fromNode, exists := g.nodes[fromUID]; exists {
+		klog.V(2).Infof("Added pending edge: %s/%s -> %s/%s (waiting for target)", 
+			fromNode.Kind, fromNode.Name, targetRef.GVK.Kind, targetRef.Name)
+	}
 }

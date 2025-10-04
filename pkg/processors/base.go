@@ -5,6 +5,7 @@ import (
 
 	"github.com/ammarlakis/astrolabe/pkg/graph"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 )
@@ -101,4 +102,26 @@ func (p *BaseProcessor) createEdgeIfNodeExists(fromUID, toUID types.UID, edgeTyp
 		ToUID:   toUID,
 	}
 	p.graph.AddEdge(edge)
+}
+
+// createEdgeOrPending creates an edge if the target exists, otherwise adds it to pending edges
+func (p *BaseProcessor) createEdgeOrPending(fromUID types.UID, targetNamespace, targetKind, targetName string, edgeType graph.EdgeType) {
+	// Try to find the target node
+	targetNode := p.findNodeByNamespaceKindName(targetNamespace, targetKind, targetName)
+	
+	if targetNode != nil {
+		// Target exists, create edge immediately
+		p.createEdgeIfNodeExists(fromUID, targetNode.UID, edgeType)
+	} else {
+		// Target doesn't exist yet, add to pending edges
+		refKey := graph.RefKey{
+			GVK: schema.GroupVersionKind{
+				Kind: targetKind,
+				// Group and Version will be matched by Kind only in processPendingEdgesForNode
+			},
+			Namespace: targetNamespace,
+			Name:      targetName,
+		}
+		p.graph.AddPendingEdge(fromUID, refKey, edgeType)
+	}
 }

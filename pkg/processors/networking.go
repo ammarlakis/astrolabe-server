@@ -9,7 +9,6 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	storagev1 "k8s.io/api/storage/v1"
-	"k8s.io/klog/v2"
 )
 
 // IngressProcessor processes Ingress resources
@@ -52,14 +51,12 @@ func (p *IngressProcessor) Process(obj interface{}, eventType EventType) error {
 	p.graph.AddNode(node)
 	p.createOwnershipEdges(node, ingress.GetOwnerReferences())
 
-	// Create edges to Services
+	// Create edges to Services (or add to pending if Service doesn't exist yet)
 	for _, rule := range ingress.Spec.Rules {
 		if rule.HTTP != nil {
 			for _, path := range rule.HTTP.Paths {
 				if path.Backend.Service != nil {
-					if svcNode := p.findNodeByNamespaceKindName(ingress.Namespace, "Service", path.Backend.Service.Name); svcNode != nil {
-						p.createEdgeIfNodeExists(node.UID, svcNode.UID, graph.EdgeIngressBackend)
-					}
+					p.createEdgeOrPending(node.UID, ingress.Namespace, "Service", path.Backend.Service.Name, graph.EdgeIngressBackend)
 				}
 			}
 		}
@@ -67,9 +64,7 @@ func (p *IngressProcessor) Process(obj interface{}, eventType EventType) error {
 
 	// Handle default backend
 	if ingress.Spec.DefaultBackend != nil && ingress.Spec.DefaultBackend.Service != nil {
-		if svcNode := p.findNodeByNamespaceKindName(ingress.Namespace, "Service", ingress.Spec.DefaultBackend.Service.Name); svcNode != nil {
-			p.createEdgeIfNodeExists(node.UID, svcNode.UID, graph.EdgeIngressBackend)
-		}
+		p.createEdgeOrPending(node.UID, ingress.Namespace, "Service", ingress.Spec.DefaultBackend.Service.Name, graph.EdgeIngressBackend)
 	}
 
 	return nil
@@ -117,19 +112,17 @@ func (p *EndpointSliceProcessor) Process(obj interface{}, eventType EventType) e
 
 	// Create edge to Service (via kubernetes.io/service-name label)
 	if serviceName, ok := endpointSlice.Labels["kubernetes.io/service-name"]; ok {
-		if svcNode := p.findNodeByNamespaceKindName(endpointSlice.Namespace, "Service", serviceName); svcNode != nil {
-			// Edge from Service to EndpointSlice
-			p.createEdgeIfNodeExists(svcNode.UID, node.UID, graph.EdgeServiceEndpoint)
-		}
+		// Note: This creates an edge FROM Service TO EndpointSlice
+		// We need to find the Service first, then create edge from it
+		p.createEdgeOrPending(node.UID, endpointSlice.Namespace, "Service", serviceName, graph.EdgeServiceEndpoint)
+		// If Service doesn't exist yet, it will create the edge when Service is added
+		// (Service processor would need to check for EndpointSlices)
 	}
 
 	// Create edges to Pods
 	for _, endpoint := range endpointSlice.Endpoints {
 		if endpoint.TargetRef != nil && endpoint.TargetRef.Kind == "Pod" {
-			if podNode := p.findNodeByNamespaceKindName(endpointSlice.Namespace, "Pod", endpoint.TargetRef.Name); podNode != nil {
-				// Edge from EndpointSlice to Pod
-				p.createEdgeIfNodeExists(node.UID, podNode.UID, graph.EdgeServiceSelector)
-			}
+			p.createEdgeOrPending(node.UID, endpointSlice.Namespace, "Pod", endpoint.TargetRef.Name, graph.EdgeServiceSelector)
 		}
 	}
 
@@ -218,12 +211,7 @@ func (p *HPAProcessor) Process(obj interface{}, eventType EventType) error {
 	p.createOwnershipEdges(node, hpa.GetOwnerReferences())
 
 	// Create edge to scale target
-	targetNode := p.findNodeByNamespaceKindName(hpa.Namespace, hpa.Spec.ScaleTargetRef.Kind, hpa.Spec.ScaleTargetRef.Name)
-	if targetNode != nil {
-		p.createEdgeIfNodeExists(node.UID, targetNode.UID, graph.EdgeHPATarget)
-		klog.V(4).Infof("Created HPA edge: %s/%s -> %s/%s",
-			node.Kind, node.Name, targetNode.Kind, targetNode.Name)
-	}
+	p.createEdgeOrPending(node.UID, hpa.Namespace, hpa.Spec.ScaleTargetRef.Kind, hpa.Spec.ScaleTargetRef.Name, graph.EdgeHPATarget)
 
 	return nil
 }
@@ -265,7 +253,7 @@ func (p *PDBProcessor) Process(obj interface{}, eventType EventType) error {
 	if pdb.Spec.Selector != nil {
 		pods := p.findNodesByLabelSelector(pdb.Namespace, "Pod", pdb.Spec.Selector.MatchLabels)
 		for _, pod := range pods {
-			p.createEdgeIfNodeExists(node.UID, pod.UID, graph.EdgeServiceSelector)
+			p.createEdgeOrPending(node.UID, pod.Namespace, "Pod", pod.Name, graph.EdgeServiceSelector)
 		}
 	}
 

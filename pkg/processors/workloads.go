@@ -60,9 +60,7 @@ func (p *DeploymentProcessor) Process(obj interface{}, eventType EventType) erro
 
 	// Create edge to ServiceAccount
 	if deployment.Spec.Template.Spec.ServiceAccountName != "" {
-		if saNode := p.findNodeByNamespaceKindName(deployment.Namespace, "ServiceAccount", deployment.Spec.Template.Spec.ServiceAccountName); saNode != nil {
-			p.createEdgeIfNodeExists(node.UID, saNode.UID, graph.EdgeServiceAccount)
-		}
+		p.createEdgeOrPending(node.UID, deployment.Namespace, "ServiceAccount", deployment.Spec.Template.Spec.ServiceAccountName, graph.EdgeServiceAccount)
 	}
 
 	return nil
@@ -127,9 +125,7 @@ func (p *StatefulSetProcessor) Process(obj interface{}, eventType EventType) err
 	p.createConfigMapSecretEdges(node, &sts.Spec.Template.Spec)
 
 	if sts.Spec.Template.Spec.ServiceAccountName != "" {
-		if saNode := p.findNodeByNamespaceKindName(sts.Namespace, "ServiceAccount", sts.Spec.Template.Spec.ServiceAccountName); saNode != nil {
-			p.createEdgeIfNodeExists(node.UID, saNode.UID, graph.EdgeServiceAccount)
-		}
+		p.createEdgeOrPending(node.UID, sts.Namespace, "ServiceAccount", sts.Spec.Template.Spec.ServiceAccountName, graph.EdgeServiceAccount)
 	}
 
 	return nil
@@ -194,9 +190,7 @@ func (p *DaemonSetProcessor) Process(obj interface{}, eventType EventType) error
 	p.createConfigMapSecretEdges(node, &ds.Spec.Template.Spec)
 
 	if ds.Spec.Template.Spec.ServiceAccountName != "" {
-		if saNode := p.findNodeByNamespaceKindName(ds.Namespace, "ServiceAccount", ds.Spec.Template.Spec.ServiceAccountName); saNode != nil {
-			p.createEdgeIfNodeExists(node.UID, saNode.UID, graph.EdgeServiceAccount)
-		}
+		p.createEdgeOrPending(node.UID, ds.Namespace, "ServiceAccount", ds.Spec.Template.Spec.ServiceAccountName, graph.EdgeServiceAccount)
 	}
 
 	return nil
@@ -267,9 +261,7 @@ func (p *ReplicaSetProcessor) Process(obj interface{}, eventType EventType) erro
 	p.createConfigMapSecretEdges(node, &rs.Spec.Template.Spec)
 
 	if rs.Spec.Template.Spec.ServiceAccountName != "" {
-		if saNode := p.findNodeByNamespaceKindName(rs.Namespace, "ServiceAccount", rs.Spec.Template.Spec.ServiceAccountName); saNode != nil {
-			p.createEdgeIfNodeExists(node.UID, saNode.UID, graph.EdgeServiceAccount)
-		}
+		p.createEdgeOrPending(node.UID, rs.Namespace, "ServiceAccount", rs.Spec.Template.Spec.ServiceAccountName, graph.EdgeServiceAccount)
 	}
 
 	return nil
@@ -327,9 +319,7 @@ func (p *JobProcessor) Process(obj interface{}, eventType EventType) error {
 	p.createConfigMapSecretEdges(node, &job.Spec.Template.Spec)
 
 	if job.Spec.Template.Spec.ServiceAccountName != "" {
-		if saNode := p.findNodeByNamespaceKindName(job.Namespace, "ServiceAccount", job.Spec.Template.Spec.ServiceAccountName); saNode != nil {
-			p.createEdgeIfNodeExists(node.UID, saNode.UID, graph.EdgeServiceAccount)
-		}
+		p.createEdgeOrPending(node.UID, job.Namespace, "ServiceAccount", job.Spec.Template.Spec.ServiceAccountName, graph.EdgeServiceAccount)
 	}
 
 	return nil
@@ -392,9 +382,7 @@ func (p *CronJobProcessor) Process(obj interface{}, eventType EventType) error {
 	p.createConfigMapSecretEdges(node, &cronJob.Spec.JobTemplate.Spec.Template.Spec)
 
 	if cronJob.Spec.JobTemplate.Spec.Template.Spec.ServiceAccountName != "" {
-		if saNode := p.findNodeByNamespaceKindName(cronJob.Namespace, "ServiceAccount", cronJob.Spec.JobTemplate.Spec.Template.Spec.ServiceAccountName); saNode != nil {
-			p.createEdgeIfNodeExists(node.UID, saNode.UID, graph.EdgeServiceAccount)
-		}
+		p.createEdgeOrPending(node.UID, cronJob.Namespace, "ServiceAccount", cronJob.Spec.JobTemplate.Spec.Template.Spec.ServiceAccountName, graph.EdgeServiceAccount)
 	}
 
 	return nil
