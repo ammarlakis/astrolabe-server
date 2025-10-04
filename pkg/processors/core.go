@@ -5,6 +5,7 @@ import (
 
 	"github.com/ammarlakis/astrolabe/pkg/graph"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 )
 
 // PodProcessor processes Pod resources
@@ -218,6 +219,13 @@ func (p *SecretProcessor) Process(obj interface{}, eventType EventType) error {
 	secret, ok := obj.(*corev1.Secret)
 	if !ok {
 		return fmt.Errorf("expected Secret, got %T", obj)
+	}
+
+	// Check if secret is a helm secret
+	if secret.Type == "helm.sh/release.v1" {
+		release := secret.Name
+		// inform manager to update the release resources
+		klog.V(3).InfoS(fmt.Sprintf("secret %s/%s is managing Helm release %s", secret.Namespace, secret.Name, release), "Secret is a Helm release")
 	}
 
 	if eventType == EventDelete {
