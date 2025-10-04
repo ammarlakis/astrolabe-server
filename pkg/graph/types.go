@@ -137,6 +137,13 @@ type PendingEdge struct {
 	EdgeType   EdgeType
 }
 
+// ReversePendingEdge represents an edge where we have the target but are waiting for the source
+type ReversePendingEdge struct {
+	ToUID     types.UID
+	SourceRef RefKey
+	EdgeType  EdgeType
+}
+
 // Graph represents the in-memory resource graph
 type Graph struct {
 	mu    sync.RWMutex
@@ -153,16 +160,20 @@ type Graph struct {
 
 	// Pending edges waiting for target resources to be created
 	pendingEdges map[RefKey][]PendingEdge // target ref -> pending edges
+	
+	// Reverse pending edges waiting for source resources to be created
+	reversePendingEdges map[RefKey][]ReversePendingEdge // source ref -> reverse pending edges
 }
 
 // NewGraph creates a new empty graph
 func NewGraph() *Graph {
 	return &Graph{
-		nodes:           make(map[types.UID]*Node),
-		byNamespaceKind: make(map[string]map[string][]*Node),
-		byHelmRelease:   make(map[string][]*Node),
-		byLabel:         make(map[string]map[string][]*Node),
-		pendingEdges:    make(map[RefKey][]PendingEdge),
+		nodes:               make(map[types.UID]*Node),
+		byNamespaceKind:     make(map[string]map[string][]*Node),
+		byHelmRelease:       make(map[string][]*Node),
+		byLabel:             make(map[string]map[string][]*Node),
+		pendingEdges:        make(map[RefKey][]PendingEdge),
+		reversePendingEdges: make(map[RefKey][]ReversePendingEdge),
 	}
 }
 
@@ -538,6 +549,7 @@ type GraphInterface interface {
 	AddEdge(edge *Edge) bool
 	RemoveEdge(fromUID, toUID types.UID)
 	AddPendingEdge(fromUID types.UID, targetRef RefKey, edgeType EdgeType)
+	AddReversePendingEdge(toUID types.UID, sourceRef RefKey, edgeType EdgeType)
 }
 
 type RefKey struct {
@@ -549,42 +561,75 @@ type RefKey struct {
 // processPendingEdgesForNode checks if any pending edges are waiting for this node
 // and creates them if found. Must be called with lock held.
 func (g *Graph) processPendingEdgesForNode(node *Node) {
-	// Create a RefKey for this node
-	gvk := schema.GroupVersionKind{
-		Group:   "", // Will be filled based on kind
-		Version: node.APIVersion,
-		Kind:    node.Kind,
-	}
+	// Check all pending edges to find matches by namespace, kind, and name
+	// We iterate through all pending edges because the GVK might not match exactly
 	
-	refKey := RefKey{
-		GVK:       gvk,
-		Namespace: node.Namespace,
-		Name:      node.Name,
-	}
+	var matchedPendingKeys []RefKey
 	
-	// Check if there are pending edges for this node
-	if pendingList, exists := g.pendingEdges[refKey]; exists {
-		klog.V(2).Infof("Found %d pending edge(s) for %s/%s", len(pendingList), node.Kind, node.Name)
-		
-		for _, pending := range pendingList {
-			// Create the edge
-			edge := &Edge{
-				Type:    pending.EdgeType,
-				FromUID: pending.FromUID,
-				ToUID:   node.UID,
+	// Check if there are pending edges where this node is the TARGET
+	for refKey, pendingList := range g.pendingEdges {
+		// Match by namespace, kind, and name (ignore GVK group/version)
+		if refKey.Namespace == node.Namespace && refKey.GVK.Kind == node.Kind && refKey.Name == node.Name {
+			klog.V(2).Infof("Found %d pending edge(s) targeting %s/%s", len(pendingList), node.Kind, node.Name)
+			
+			for _, pending := range pendingList {
+				// Create the edge
+				edge := &Edge{
+					Type:    pending.EdgeType,
+					FromUID: pending.FromUID,
+					ToUID:   node.UID,
+				}
+				
+				// Add edge to both nodes
+				if fromNode, exists := g.nodes[pending.FromUID]; exists {
+					fromNode.OutgoingEdges[node.UID] = edge
+					node.IncomingEdges[pending.FromUID] = edge
+					klog.V(2).Infof("Created pending edge: %s/%s -> %s/%s", 
+						fromNode.Kind, fromNode.Name, node.Kind, node.Name)
+				}
 			}
 			
-			// Add edge to both nodes
-			if fromNode, exists := g.nodes[pending.FromUID]; exists {
-				fromNode.OutgoingEdges[node.UID] = edge
-				node.IncomingEdges[pending.FromUID] = edge
-				klog.V(2).Infof("Created pending edge: %s/%s -> %s/%s", 
-					fromNode.Kind, fromNode.Name, node.Kind, node.Name)
-			}
+			matchedPendingKeys = append(matchedPendingKeys, refKey)
 		}
-		
-		// Remove from pending edges
-		delete(g.pendingEdges, refKey)
+	}
+	
+	// Remove matched pending edges
+	for _, key := range matchedPendingKeys {
+		delete(g.pendingEdges, key)
+	}
+	
+	var matchedReverseKeys []RefKey
+	
+	// Check if there are reverse pending edges where this node is the SOURCE
+	for refKey, reversePendingList := range g.reversePendingEdges {
+		// Match by namespace, kind, and name (ignore GVK group/version)
+		if refKey.Namespace == node.Namespace && refKey.GVK.Kind == node.Kind && refKey.Name == node.Name {
+			klog.V(2).Infof("Found %d reverse pending edge(s) from %s/%s", len(reversePendingList), node.Kind, node.Name)
+			
+			for _, reversePending := range reversePendingList {
+				// Create the edge
+				edge := &Edge{
+					Type:    reversePending.EdgeType,
+					FromUID: node.UID,
+					ToUID:   reversePending.ToUID,
+				}
+				
+				// Add edge to both nodes
+				if toNode, exists := g.nodes[reversePending.ToUID]; exists {
+					node.OutgoingEdges[reversePending.ToUID] = edge
+					toNode.IncomingEdges[node.UID] = edge
+					klog.V(2).Infof("Created reverse pending edge: %s/%s -> %s/%s", 
+						node.Kind, node.Name, toNode.Kind, toNode.Name)
+				}
+			}
+			
+			matchedReverseKeys = append(matchedReverseKeys, refKey)
+		}
+	}
+	
+	// Remove matched reverse pending edges
+	for _, key := range matchedReverseKeys {
+		delete(g.reversePendingEdges, key)
 	}
 }
 
@@ -604,5 +649,24 @@ func (g *Graph) AddPendingEdge(fromUID types.UID, targetRef RefKey, edgeType Edg
 	if fromNode, exists := g.nodes[fromUID]; exists {
 		klog.V(2).Infof("Added pending edge: %s/%s -> %s/%s (waiting for target)", 
 			fromNode.Kind, fromNode.Name, targetRef.GVK.Kind, targetRef.Name)
+	}
+}
+
+// AddReversePendingEdge adds a reverse pending edge where we have the target but are waiting for the source
+func (g *Graph) AddReversePendingEdge(toUID types.UID, sourceRef RefKey, edgeType EdgeType) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	
+	reversePending := ReversePendingEdge{
+		ToUID:     toUID,
+		SourceRef: sourceRef,
+		EdgeType:  edgeType,
+	}
+	
+	g.reversePendingEdges[sourceRef] = append(g.reversePendingEdges[sourceRef], reversePending)
+	
+	if toNode, exists := g.nodes[toUID]; exists {
+		klog.V(2).Infof("Added reverse pending edge: %s/%s -> %s/%s (waiting for source)", 
+			sourceRef.GVK.Kind, sourceRef.Name, toNode.Kind, toNode.Name)
 	}
 }

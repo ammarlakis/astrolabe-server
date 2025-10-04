@@ -110,13 +110,10 @@ func (p *EndpointSliceProcessor) Process(obj interface{}, eventType EventType) e
 	p.graph.AddNode(node)
 	p.createOwnershipEdges(node, endpointSlice.GetOwnerReferences())
 
-	// Create edge to Service (via kubernetes.io/service-name label)
+	// Create edge FROM Service TO EndpointSlice (via kubernetes.io/service-name label)
+	// We have the EndpointSlice (target) but need to wait for the Service (source)
 	if serviceName, ok := endpointSlice.Labels["kubernetes.io/service-name"]; ok {
-		// Note: This creates an edge FROM Service TO EndpointSlice
-		// We need to find the Service first, then create edge from it
-		p.createEdgeOrPending(node.UID, endpointSlice.Namespace, "Service", serviceName, graph.EdgeServiceEndpoint)
-		// If Service doesn't exist yet, it will create the edge when Service is added
-		// (Service processor would need to check for EndpointSlices)
+		p.createReverseEdgeOrPending(node.UID, endpointSlice.Namespace, "Service", serviceName, graph.EdgeServiceEndpoint)
 	}
 
 	// Create edges to Pods

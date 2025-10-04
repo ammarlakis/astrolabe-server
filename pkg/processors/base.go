@@ -125,3 +125,25 @@ func (p *BaseProcessor) createEdgeOrPending(fromUID types.UID, targetNamespace, 
 		p.graph.AddPendingEdge(fromUID, refKey, edgeType)
 	}
 }
+
+// createReverseEdgeOrPending creates an edge if the source exists, otherwise adds it to reverse pending edges
+// This is used when we have the target node but need to wait for the source node
+func (p *BaseProcessor) createReverseEdgeOrPending(toUID types.UID, sourceNamespace, sourceKind, sourceName string, edgeType graph.EdgeType) {
+	// Try to find the source node
+	sourceNode := p.findNodeByNamespaceKindName(sourceNamespace, sourceKind, sourceName)
+	
+	if sourceNode != nil {
+		// Source exists, create edge immediately
+		p.createEdgeIfNodeExists(sourceNode.UID, toUID, edgeType)
+	} else {
+		// Source doesn't exist yet, add to reverse pending edges
+		refKey := graph.RefKey{
+			GVK: schema.GroupVersionKind{
+				Kind: sourceKind,
+			},
+			Namespace: sourceNamespace,
+			Name:      sourceName,
+		}
+		p.graph.AddReversePendingEdge(toUID, refKey, edgeType)
+	}
+}
