@@ -1,10 +1,10 @@
 # Astrolabe - Kubernetes State Server
 
-Astrolabe is a lightweight, in-cluster Kubernetes state server that watches cluster resources and maintains a live graph of relationships. It's designed to replace direct cluster access for the Grafana Kubernetes datasource plugin, providing efficient querying and real-time updates.
+Astrolabe is a lightweight, in-cluster Kubernetes state server that watches cluster resources and maintains a live graph of relationships.
 
 ## Features
 
-- **🔥 NEW: Persistent Storage**: Redis-backed persistence - survives pod restarts! ([See PERSISTENCE.md](PERSISTENCE.md))
+- **Persistent Storage**: Optional Redis-backed persistence with automatic snapshots
 - **In-Memory Graph Database**: Fast, efficient storage of Kubernetes resources and their relationships
 - **Real-Time Updates**: Uses Kubernetes informers with shared caches for minimal overhead
 - **Relationship Tracking**: Automatically derives edges between resources:
@@ -17,40 +17,64 @@ Astrolabe is a lightweight, in-cluster Kubernetes state server that watches clus
   - And more...
 - **Helm-Aware**: Tracks Helm releases and charts automatically
 - **Label Filtering**: Optionally filter resources by labels to reduce memory footprint
-- **HTTP API**: RESTful API compatible with the existing Grafana datasource plugin
-- **Resource Status**: Intelligent status detection for all resource types
+- **Smart Release Filtering**: Automatically includes cluster-scoped resources (like PersistentVolumes) when querying by release
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Kubernetes Cluster                      │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
-│  │   Pods   │  │ Services │  │   PVCs   │  │   ...    │   │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘   │
-│       │             │              │             │          │
-│       └─────────────┴──────────────┴─────────────┘          │
-│                          │                                   │
-│                    ┌─────▼─────┐                            │
-│                    │  Informers │                            │
-│                    │  (Watch)   │                            │
-│                    └─────┬─────┘                            │
-│                          │                                   │
-│                    ┌─────▼─────┐                            │
-│                    │ Astrolabe │                            │
-│                    │  (Graph)  │                            │
-│                    └─────┬─────┘                            │
-│                          │                                   │
-│                    ┌─────▼─────┐                            │
-│                    │ HTTP API  │                            │
-│                    └─────┬─────┘                            │
+┌────────────────────────────────────────────────────────────┐
+│                      Kubernetes Cluster                    │
+│  ┌──────────┐  ┌──────────┐   ┌──────────┐  ┌──────────┐   │
+│  │   Pods   │  │ Services │   │   PVCs   │  │   ...    │   │
+│  └────┬─────┘  └────┬─────┘   └────┬─────┘  └────┬─────┘   │
+│       │             │              │             │         │
+│       └─────────────┴──────────────┴─────────────┘         │
+│                          │                                 │
+│                    ┌─────▼─────┐                           │
+│                    │ Informers │                           │
+│                    │  (Watch)  │                           │
+│                    └─────┬─────┘                           │
+│                          │                                 │
+│                    ┌─────▼─────┐                           │
+│                    │ Astrolabe │                           │
+│                    │  (Graph)  │                           │
+│                    └─────┬─────┘                           │
+│                          │                                 │
+│                    ┌─────▼─────┐                           │
+│                    │ HTTP API  │                           │
+│                    └─────┬─────┘                           │
 └──────────────────────────┼─────────────────────────────────┘
                            │
                     ┌──────▼──────┐
                     │   Grafana   │
-                    │ Datasource  │
+                    │  Astrolabe  │
+                    │     App     │
                     └─────────────┘
 ```
+
+## Key Capabilities
+
+### Smart Resource Filtering
+
+Astrolabe intelligently handles cluster-scoped resources when filtering by Helm release:
+
+- **PersistentVolumes**: Automatically included when bound to PVCs in a release, even though PVs don't have Helm labels
+- **Release Isolation**: Resources from other releases are excluded, even when connected through shared cluster resources
+- **Direct Connections Only**: Unmanaged resources are only included if directly connected to release resources, preventing cross-contamination
+
+### Efficient Resource Tracking
+
+- **Shared Informers**: Single set of watchers for all resources, minimizing cluster load
+- **Event-Driven Updates**: Real-time updates via Kubernetes watch API, no polling
+- **Optimized Indexing**: Multiple indexes for fast lookups by namespace, kind, release, and labels
+- **Label Filtering**: Optional filtering to track only relevant resources
+
+### Persistence & Reliability
+
+- **Redis Backend**: Optional persistence with automatic snapshots
+- **Fast Recovery**: Quick startup by loading cached state from Redis
+- **Graceful Shutdown**: Final snapshot on shutdown ensures no data loss
+- **Async Writes**: Non-blocking persistence for better performance
 
 ## Installation
 
@@ -59,14 +83,13 @@ Astrolabe is a lightweight, in-cluster Kubernetes state server that watches clus
 - Kubernetes cluster (1.24+)
 - kubectl configured
 - Go 1.21+ (for building from source)
-- Docker & Docker Compose (for local development with persistence)
-- Redis 7+ (optional, for persistence)
+- Docker & Docker Compose (for local development)
+- Redis 7+ (optional, for persistence - included in docker-compose setup)
 
 ### Quick Start with Docker Compose (Recommended for Development)
 
 ```bash
 # Start Astrolabe with Redis persistence
-cd kubernetes-state-server
 docker-compose up -d
 
 # View logs
@@ -81,9 +104,10 @@ docker-compose down
 ```
 
 This starts:
-- Redis with RDB + AOF persistence
-- Astrolabe with persistence enabled
-- Graph survives restarts!
+- Redis 7 with RDB + AOF persistence
+- Astrolabe with Redis persistence enabled
+- Automatic periodic snapshots (every 5 minutes by default)
+- Graph state survives restarts!
 
 ### Deploy to Kubernetes
 
@@ -95,7 +119,7 @@ This starts:
    ```
 
 2. **Deploy to cluster**:
-   
+
    **Without Persistence (In-Memory Only):**
    ```bash
    kubectl apply -f deploy/deployment.yaml
@@ -103,20 +127,23 @@ This starts:
 
    **With Persistence (Recommended for Production):**
    ```bash
-   # Deploy Redis first
-   kubectl apply -f deploy/redis.yaml
-   
-   # Deploy Astrolabe with persistence enabled
+   # Deploy Astrolabe
    kubectl apply -f deploy/deployment.yaml
-   kubectl set env deployment/astrolabe ENABLE_PERSISTENCE=true REDIS_ADDR=redis:6379 -n astrolabe-system
+
+   # Enable persistence (requires Redis deployment)
+   kubectl set env deployment/astrolabe \
+     ENABLE_PERSISTENCE=true \
+     REDIS_ADDR=redis:6379 \
+     -n astrolabe-system
    ```
+
+   Note: You'll need to deploy Redis separately. See the `docker-compose.yaml` for a reference Redis configuration.
 
    This creates:
    - Namespace: `astrolabe-system`
    - ServiceAccount with ClusterRole for read-only access
    - Deployment with 1 replica
-   - ClusterIP Service
-   - (Optional) Redis with persistent volume
+   - ClusterIP Service on port 8080
 
 3. **Verify deployment**:
    ```bash
@@ -129,7 +156,7 @@ This starts:
 1. **Clone the repository**:
    ```bash
    git clone <repository-url>
-   cd kubernetes-state-server
+   cd astrolabe-server
    ```
 
 2. **Install dependencies**:
@@ -144,12 +171,15 @@ This starts:
 
 4. **Run locally** (requires kubeconfig):
    ```bash
-   # With Helm filter (default)
+   # In-memory only (no persistence)
    make run
-   
+
    # Without filters (all resources)
    make run-all
-   
+
+   # With Redis persistence (requires Redis running)
+   make run-persistent
+
    # Custom configuration
    ./bin/astrolabe --in-cluster=false --port=8080 --label-selector="" --v=2
    ```
@@ -163,17 +193,18 @@ This starts:
 | `--kubeconfig` | `~/.kube/config` | Path to kubeconfig file |
 | `--in-cluster` | `true` | Use in-cluster configuration |
 | `--port` | `8080` | HTTP API server port |
-| `--label-selector` | `app.kubernetes.io/managed-by=Helm` | Label selector to filter resources |
+| `--label-selector` | `""` | Label selector to filter resources (empty = all resources) |
 | `--enable-persistence` | `false` | Enable Redis persistence |
 | `--redis-addr` | `localhost:6379` | Redis server address |
 | `--redis-password` | `""` | Redis password |
 | `--redis-db` | `0` | Redis database number |
-| `--snapshot-interval` | `300` | Snapshot interval in seconds |
+| `--snapshot-interval` | `300` | Snapshot interval in seconds (0 = disabled) |
 | `--v` | `0` | Log verbosity level (0-4) |
 
 ### Environment Variables
 
 - `KUBECONFIG`: Path to kubeconfig file (overridden by `--kubeconfig` flag)
+- `LABEL_SELECTOR`: Label selector to filter resources (overridden by `--label-selector` flag)
 - `ENABLE_PERSISTENCE`: Enable Redis persistence (`true`/`false`)
 - `REDIS_ADDR`: Redis server address
 - `REDIS_PASSWORD`: Redis password
@@ -181,17 +212,19 @@ This starts:
 
 ### Label Filtering
 
-By default, Astrolabe only tracks resources managed by Helm (`app.kubernetes.io/managed-by=Helm`). This significantly reduces memory usage in large clusters.
+By default, Astrolabe tracks all resources in the cluster. You can optionally filter resources by labels to reduce memory usage in large clusters.
 
-To track all resources:
+To filter only Helm-managed resources:
 ```bash
---label-selector=""
+--label-selector="app.kubernetes.io/managed-by=Helm"
 ```
 
 To use custom filters:
 ```bash
 --label-selector="environment=production,team=platform"
 ```
+
+**Note**: PersistentVolumes are always tracked regardless of label selector, as they are cluster-scoped and typically don't have Helm labels but are needed for complete resource graphs.
 
 ## API Reference
 
@@ -219,9 +252,9 @@ Query Parameters:
 - `release` (optional): Filter by Helm release name
 - `namespace` (optional): Filter by namespace
 
-Response: Array of resources compatible with Grafana datasource format
+Response: Array of resources with metadata
 
-When filtering by `release`, the API now automatically includes `PersistentVolume` resources that are bound to any `PersistentVolumeClaim` in the release. This ensures storage resources that are cluster-scoped still appear alongside their associated release.
+**Smart Filtering**: When filtering by `release`, the API automatically includes cluster-scoped resources (like `PersistentVolume`) that are bound to resources in the release. This ensures complete resource graphs even when cluster-scoped resources don't have Helm labels.
 
 ### Get Releases
 
@@ -296,22 +329,66 @@ Response:
 }
 ```
 
-## Integration with Grafana Datasource
+## Persistence
 
-To use Astrolabe with the Grafana Kubernetes datasource plugin:
+Astrolabe supports optional Redis-backed persistence to survive restarts and maintain state across deployments.
+
+### How It Works
+
+1. **Automatic Snapshots**: Astrolabe periodically saves the entire graph to Redis (default: every 5 minutes)
+2. **On-Demand Snapshots**: Manual snapshots are created on graceful shutdown
+3. **Startup Recovery**: On startup, Astrolabe loads the last snapshot from Redis and continues watching for updates
+4. **Async Writes**: Individual resource updates are written asynchronously for better performance
+5. **Graceful Degradation**: If Redis is unavailable, Astrolabe continues operating in memory-only mode
+
+### Configuration
+
+Enable persistence via environment variables or command-line flags:
+
+```bash
+# Environment variables (recommended for Docker/Kubernetes)
+ENABLE_PERSISTENCE=true
+REDIS_ADDR=redis:6379
+REDIS_PASSWORD=your-password  # optional
+REDIS_DB=0
+
+# Command-line flags
+./astrolabe --enable-persistence=true --redis-addr=redis:6379 --snapshot-interval=300
+```
+
+### Redis Configuration
+
+For production use, configure Redis with both RDB and AOF persistence:
+
+```conf
+# RDB snapshots
+save 900 1
+save 300 10
+save 60 10000
+
+# AOF persistence
+appendonly yes
+appendfsync everysec
+```
+
+See `redis.conf` in the repository for a complete example.
+
+## Integration with Grafana
+
+To use Astrolabe with the Grafana Astrolabe App:
 
 1. **Expose Astrolabe service** (if Grafana is outside the cluster):
    ```bash
    kubectl -n astrolabe-system port-forward svc/astrolabe 8080:8080
    ```
-   
+
    Or create an Ingress/LoadBalancer service.
 
-2. **Configure datasource** in Grafana:
+2. **Configure the Astrolabe App** in Grafana:
    - URL: `http://astrolabe.astrolabe-system.svc.cluster.local:8080` (in-cluster)
    - Or: `http://localhost:8080` (port-forward)
 
-3. **Update datasource plugin** to use Astrolabe endpoints instead of direct Kubernetes API.
+3. The app will use Astrolabe's API endpoints to visualize your Kubernetes resources and their relationships.
 
 ## Resource Types Tracked
 
@@ -365,22 +442,32 @@ To use Astrolabe with the Grafana Kubernetes datasource plugin:
 
 ### Memory Usage
 
-Typical memory usage (with Helm filter):
-- Small cluster (50 Helm resources): ~50 MB
-- Medium cluster (500 Helm resources): ~150 MB
-- Large cluster (5000 Helm resources): ~500 MB
+Typical memory usage varies based on cluster size and label filtering:
+- Small cluster (50-100 resources): ~50-100 MB
+- Medium cluster (500-1000 resources): ~150-300 MB
+- Large cluster (5000+ resources): ~500 MB - 1 GB
+
+**Tip**: Use label selectors to reduce memory footprint in large clusters.
 
 ### CPU Usage
 
-- Startup: ~100m CPU (during initial sync)
+- Startup: ~50-100m CPU (during initial sync and cache warm-up)
 - Steady state: ~10-20m CPU
-- Updates: Minimal overhead (event-driven)
+- Updates: Minimal overhead (event-driven with informers)
+- Persistence: Additional ~5-10m CPU for periodic snapshots (when enabled)
+
+### Storage (with Redis Persistence)
+
+- Graph snapshot size: ~1-5 MB per 1000 resources
+- Redis memory: Similar to Astrolabe memory usage
+- Snapshot frequency: Configurable (default: 5 minutes)
 
 ### Network
 
 - Uses Kubernetes watch API (efficient long-polling)
 - Minimal bandwidth usage after initial sync
 - No polling overhead
+- Redis: Minimal traffic (only on updates and snapshots)
 
 ## Troubleshooting
 
@@ -419,19 +506,27 @@ curl http://localhost:8080/api/v1/releases
 │       └── main.go
 ├── pkg/
 │   ├── api/                # HTTP API server
-│   │   └── server.go
+│   │   ├── server.go       # API handlers and routing
+│   │   ├── helpers.go      # Helper functions for filtering
+│   │   └── types.go        # API response types
 │   ├── graph/              # Graph data structures
-│   │   └── types.go
+│   │   ├── types.go        # Core graph implementation
+│   │   └── persistent.go   # Redis-backed persistent graph
 │   ├── informers/          # Kubernetes informers
-│   │   └── manager.go
-│   └── processors/         # Resource processors
-│       ├── base.go
-│       ├── core.go
-│       ├── workloads.go
-│       ├── networking.go
-│       └── registry.go
+│   │   ├── manager.go      # Informer lifecycle management
+│   │   └── handlers.go     # Event handlers
+│   ├── processors/         # Resource processors
+│   │   ├── base.go         # Base processor interface
+│   │   ├── core.go         # Core resources (Pods, Services, etc.)
+│   │   ├── workloads.go    # Workload resources (Deployments, etc.)
+│   │   ├── networking.go   # Network resources (Ingress, etc.)
+│   │   └── registry.go     # Processor registry
+│   └── storage/            # Persistence layer
+│       └── redis.go        # Redis backend implementation
 ├── deploy/                 # Kubernetes manifests
 │   └── deployment.yaml
+├── docker-compose.yaml     # Local development with Redis
+├── redis.conf              # Redis configuration
 ├── Dockerfile
 ├── Makefile
 ├── go.mod
@@ -440,10 +535,20 @@ curl http://localhost:8080/api/v1/releases
 
 ### Adding New Resource Types
 
-1. Add informer registration in `pkg/informers/manager.go`
-2. Create processor in `pkg/processors/`
-3. Register processor in `pkg/processors/registry.go`
-4. Update RBAC in `deploy/deployment.yaml`
+1. **Add informer** in `pkg/informers/manager.go`:
+   - Register the informer with appropriate event handlers
+   - Consider if label filtering should apply
+
+2. **Create processor** in `pkg/processors/`:
+   - Implement the `Processor` interface
+   - Extract relevant metadata and status
+   - Define relationship edges to other resources
+
+3. **Register processor** in `pkg/processors/registry.go`:
+   - Add to the processor registry
+
+4. **Update RBAC** in `deploy/deployment.yaml`:
+   - Add necessary permissions to the ClusterRole
 
 ### Running Tests
 
@@ -457,30 +562,32 @@ make test
 make fmt
 ```
 
-## Comparison with Direct Kubernetes Access
+### Building and Running
 
-| Feature | Astrolabe | Direct K8s API |
-|---------|-----------|----------------|
-| Query Speed | Fast (in-memory) | Slower (API calls) |
-| Relationship Queries | Native support | Manual joins |
-| Resource Overhead | Low (shared informers) | High (multiple watchers) |
-| Network Usage | Minimal | Higher |
-| Cluster Load | Low | Higher |
-| Setup Complexity | Medium | Low |
-| Security | Isolated service account | Direct access |
-| **Persistence** | **✅ Redis-backed** | **❌ None** |
-| **Survives Restarts** | **✅ Yes** | **N/A** |
+```bash
+# Build binary
+make build
+
+# Run locally (development)
+make run
+
+# Build and run with Docker Compose
+make up
+make logs
+```
 
 ## Future Enhancements
 
 - [ ] Metrics export (Prometheus)
 - [ ] GraphQL API
-- [ ] Persistent storage option
 - [ ] Multi-cluster support
 - [ ] Advanced filtering and search
 - [ ] WebSocket support for real-time updates
-- [ ] Helm release metadata extraction
+- [ ] Helm release metadata extraction (values, hooks, etc.)
 - [ ] Custom resource definitions (CRDs) support
+- [ ] PostgreSQL backend option (alternative to Redis)
+- [ ] Resource history tracking and time-series queries
+- [ ] Performance benchmarks and optimization
 
 ## Contributing
 
@@ -494,8 +601,5 @@ Contributions are welcome! Please:
 
 ## License
 
-[Add your license here]
-
-## Credits
-
-Created as part of the Grafana Kubernetes visualization project.
+Astrolabe is open source under the [GNU Affero General Public License v3.0 (AGPLv3)](LICENSE).
+Contributions are welcome. Commercial use is allowed, provided that modifications and derived works are also open-sourced under the same license.
