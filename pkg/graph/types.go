@@ -183,38 +183,60 @@ func (g *Graph) AddNode(node *Node) {
 	defer g.mu.Unlock()
 
 	// Check if this is an update or new node
-	_, isUpdate := g.nodes[node.UID]
+	oldNode, isUpdate := g.nodes[node.UID]
 
-	// Remove old node from indexes if it exists
-	if oldNode, exists := g.nodes[node.UID]; exists {
-		g.removeFromIndexes(oldNode)
-	}
-
-	// Initialize edge maps if nil
-	if node.OutgoingEdges == nil {
-		node.OutgoingEdges = make(map[types.UID]*Edge)
-	}
-	if node.IncomingEdges == nil {
-		node.IncomingEdges = make(map[types.UID]*Edge)
-	}
-
-	// Add to main map
-	g.nodes[node.UID] = node
-
-	// Add to indexes
-	g.addToIndexes(node)
-
-	// Check for pending edges targeting this node
-	if !isUpdate {
-		g.processPendingEdgesForNode(node)
-	}
-
-	// Log the operation
 	if isUpdate {
-		klog.V(3).Infof("Graph: UPDATED %s/%s (release: %s, status: %s)", node.Kind, node.Name, node.HelmRelease, node.Status)
+		// Preserve existing edges when updating
+		node.OutgoingEdges = oldNode.OutgoingEdges
+		node.IncomingEdges = oldNode.IncomingEdges
+
+		// Only update indexes if indexable fields changed
+		needsReindex := oldNode.Namespace != node.Namespace ||
+			oldNode.Kind != node.Kind ||
+			oldNode.HelmRelease != node.HelmRelease ||
+			!labelsEqual(oldNode.Labels, node.Labels)
+
+		if needsReindex {
+			g.removeFromIndexes(oldNode)
+			g.nodes[node.UID] = node
+			g.addToIndexes(node)
+			klog.V(3).Infof("Graph: UPDATED %s/%s (reindexed, release: %s, status: %s)", node.Kind, node.Name, node.HelmRelease, node.Status)
+		} else {
+			// In-place update without touching indexes
+			g.nodes[node.UID] = node
+			klog.V(4).Infof("Graph: UPDATED %s/%s (in-place, status: %s)", node.Kind, node.Name, node.Status)
+		}
 	} else {
+		// New node - initialize edge maps if nil
+		if node.OutgoingEdges == nil {
+			node.OutgoingEdges = make(map[types.UID]*Edge)
+		}
+		if node.IncomingEdges == nil {
+			node.IncomingEdges = make(map[types.UID]*Edge)
+		}
+
+		// Add to main map and indexes
+		g.nodes[node.UID] = node
+		g.addToIndexes(node)
+
+		// Check for pending edges targeting this node
+		g.processPendingEdgesForNode(node)
+
 		klog.V(2).Infof("Graph: ADDED %s/%s (release: %s, status: %s)", node.Kind, node.Name, node.HelmRelease, node.Status)
 	}
+}
+
+// labelsEqual checks if two label maps are equal
+func labelsEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 // RemoveNode removes a node and its edges from the graph
@@ -298,9 +320,21 @@ func (g *Graph) GetNodesByNamespaceKind(namespace, kind string) []*Node {
 
 	if kindMap, exists := g.byNamespaceKind[nsKey]; exists {
 		if nodes, exists := kindMap[kind]; exists {
-			// Return a copy to avoid concurrent modification
-			result := make([]*Node, len(nodes))
-			copy(result, nodes)
+			// Defensive: verify all indexed nodes still exist in main map
+			result := make([]*Node, 0, len(nodes))
+			inconsistent := false
+			for _, node := range nodes {
+				if actualNode, exists := g.nodes[node.UID]; exists {
+					result = append(result, actualNode)
+				} else {
+					klog.Warningf("Index inconsistency: %s/%s in index but not in main map (UID: %s)",
+						kind, node.Name, node.UID)
+					inconsistent = true
+				}
+			}
+			if inconsistent {
+				klog.Warningf("Found index inconsistency for %s in namespace %s", kind, namespace)
+			}
 			return result
 		}
 	}

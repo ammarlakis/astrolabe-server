@@ -9,6 +9,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/klog/v2"
 )
 
 // IngressProcessor processes Ingress resources
@@ -85,7 +86,13 @@ func (p *EndpointSliceProcessor) Process(obj interface{}, eventType EventType) e
 		return fmt.Errorf("expected EndpointSlice, got %T", obj)
 	}
 
+	klog.V(2).Infof("EndpointSlice %s: %s/%s (UID: %s, RV: %s)",
+		eventType, endpointSlice.Namespace, endpointSlice.Name,
+		endpointSlice.UID, endpointSlice.ResourceVersion)
+
 	if eventType == EventDelete {
+		klog.V(1).Infof("Deleting EndpointSlice: %s/%s (UID: %s)",
+			endpointSlice.Namespace, endpointSlice.Name, endpointSlice.UID)
 		return p.handleDelete(endpointSlice, "EndpointSlice")
 	}
 

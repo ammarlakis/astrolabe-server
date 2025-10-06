@@ -1,4 +1,4 @@
-# Astrolabe - Kubernetes State Server
+# Astrolabe Server
 
 Astrolabe is a lightweight, in-cluster Kubernetes state server that watches cluster resources and maintains a live graph of relationships.
 

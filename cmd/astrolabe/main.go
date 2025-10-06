@@ -71,7 +71,7 @@ func getEnvInt(key string, defaultValue int) int {
 func main() {
 	flag.Parse()
 
-	klog.Info("Starting Astrolabe - Kubernetes State Server")
+	klog.Info("Starting Astrolabe Server")
 
 	// Check for environment variable override for label selector
 	if envSelector := os.Getenv("LABEL_SELECTOR"); envSelector != "" || os.Getenv("LABEL_SELECTOR") == "" {
