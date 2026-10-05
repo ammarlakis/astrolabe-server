@@ -1,0 +1,24 @@
+# Reviewed repository intent. Live results are collected by Backstage.
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: astrolabe-server
+  namespace: ammarlakis
+  description: Astrolabe Kubernetes state indexer
+  annotations:
+    github.com/project-slug: ammarlakis/astrolabe-server
+spec:
+  type: application
+  owner: user:default/ammarlakis
+  lifecycle: unknown
+  maintenance:
+    types:
+      - type: application
+        path: .
+    languages:
+      - go
+    technologies: []
+    delivery:
+      release: null
+      deployment: null
+    checks: {}
